@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
     int num_otimizadores; // numero de threads/num_otimizadores
     int num_function_choices[3] = {2001,2003,2006}; // opcoes de funcao
     int num_function; // funcao selecionada
+    int avaliacoes = 0;
 
     /* atribuicoes iniciais */
     num_otimizadores = atoi(argv[1]); // pega a numero de threads do programa
@@ -55,7 +56,11 @@ int main(int argc, char* argv[]) {
     double termo_acoplamento = 0;
 
     /* inicia regiao paralela */
-    # pragma omp parallel num_threads(num_otimizadores) default(none) shared(t_gen, t_ac, num_otimizadores, dim, num_function, var_desejada, atuais_solucoes, max_sol) firstprivate(num_aleatorio, sol_corrente, sol_nova) private(custo_sol_corrente, custo_sol_nova, tmp)
+    # pragma omp parallel num_threads(num_otimizadores) \
+    default(none) \
+    shared(termo_acoplamento, avaliacoes, t_gen, t_ac, num_otimizadores, dim, num_function, var_desejada, atuais_solucoes, max_sol) \
+    firstprivate(num_aleatorio, sol_corrente, sol_nova) \
+    private(custo_sol_corrente, custo_sol_nova, tmp)
     {
         int my_rank = omp_get_thread_num(); // rank da thread/otimizador
         struct drand48_data buffer; // semente
@@ -68,8 +73,14 @@ int main(int argc, char* argv[]) {
     		sol_corrente[i] = 2.0*num_aleatorio-1.0;
     	}
 
-        custo_sol_nova = CSA_EvalCost(sol_corrente, dim, num_function); // nova energia
-        atuais_solucoes[my_rank] = custo_sol_nova; // coloca a atual energia num vetor auxiliar de energias
+        custo_sol_corrente = CSA_EvalCost(sol_corrente, dim, num_function); // nova energia corrente
+        
+        # pragma omp critical
+        {
+            avaliacoes++;
+        }
+
+        atuais_solucoes[my_rank] = custo_sol_corrente; // coloca a atual energia num vetor auxiliar de energias
 
         # pragma omp barrier // sincronizacao
 
@@ -80,7 +91,7 @@ int main(int argc, char* argv[]) {
             max_sol = maxValue(atuais_solucoes, num_otimizadores); // maior/pior solucao atual
 
             for (i = 0; i < num_otimizadores; i++) {
-                termo_acoplamento = pow(E, ((atuais_solucoes[i] - max_sol)/t_ac));
+                termo_acoplamento += pow(E, ((atuais_solucoes[i] - max_sol)/t_ac));
             }
         }
 
@@ -88,14 +99,42 @@ int main(int argc, char* argv[]) {
             Geracoes de Yi a partir de Xi
             O laco so termina quando a funcao for avaliada 1 KK de vezes
         */
-        do {
-            for (size_t i = 0; i < count; i++) {
-                /* code */
+        while(avaliacoes > 0){
+            // gera a nova solucao a partir da corrente
+            for (size_t i = 0; i < num_otimizadores; i++) {
+                drand48_r(&buffer, &num_aleatorio); //gera um número entre 0 e 1
+                sol_nova[i] = fmod((sol_corrente[i] + t_gen * tan(PI*(num_aleatorio-0.5))), 1.0);
             }
-        } while(avaliacoes > 0);
+
+            // nova energia
+            custo_sol_nova = CSA_EvalCost(sol_nova, dim, num_function);
+
+            // incrementa +1 avaliacao na funcao objetivo
+            # pragma omp critical
+            {
+                avaliacoes++;
+            }
+        
+            drand48_r(&buffer, &num_aleatorio); // novo numero aleatorio entre 0 e 1
+            double func_prob = pow(( ), E);
+
+            // avaliacao dos atuais custos/energias
+            if (custo_sol_nova < custo_sol_corrente){
+                custo_sol_corrente = custo_sol_nova;
+                atuais_solucoes[my_rank] = custo_sol_corrente;
+            } else if (){
+
+            }
+
+        }
+    
+
+
+
+
+
+
     }
-
-
 
     //
     //
