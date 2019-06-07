@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <math.h>
 #include <assert.h>
+#include <omp.h>
 #include "CSA_Problem.h"
 
 #ifndef PI
@@ -47,19 +48,20 @@ int main(int argc, char* argv[]) {
     dim = atoi(argv[2]); // pega a dimensao do arg da linha de comando
     num_function = num_function_choices[atoi(argv[3])]; // pega a funcao a ser usada
 
-    double var_desejada = 0.99 * ((num_otimizadores - 1)/num_otimizadores); // calculo da variancia desejada
+    double var_desejada = 0.99 * ((num_otimizadores - 1)/(num_otimizadores * num_otimizadores )); // calculo da variancia desejada
     double max_sol;
     double *sol_corrente = (double *)malloc(dim * sizeof(double)); // solucao corrente
     double *sol_nova = (double *)malloc(dim * sizeof(double)); // solucao nova
     double *tmp =NULL; // usado para trocar valores
     double *atuais_solucoes = (double *)malloc(num_otimizadores * sizeof(double));
     double termo_acoplamento = 0;
+    double sigma = 0;
 
     /* inicia regiao paralela */
     # pragma omp parallel num_threads(num_otimizadores) \
     default(none) \
-    shared(termo_acoplamento, avaliacoes, t_gen, t_ac, num_otimizadores, dim, num_function, var_desejada, atuais_solucoes, max_sol) \
-    firstprivate(num_aleatorio, sol_corrente, sol_nova) \
+    shared(k, termo_acoplamento, avaliacoes, t_gen, t_ac, num_otimizadores, dim, num_function, var_desejada, atuais_solucoes, max_sol) \
+    firstprivate(sigma, num_aleatorio, sol_corrente, sol_nova) \
     private(custo_sol_corrente, custo_sol_nova, tmp)
     {
         int my_rank = omp_get_thread_num(); // rank da thread/otimizador
@@ -74,15 +76,18 @@ int main(int argc, char* argv[]) {
     	}
 
         custo_sol_corrente = CSA_EvalCost(sol_corrente, dim, num_function); // nova energia corrente
-        
+
+        // incrementa +1 avaliacao na funcao objetivo
         # pragma omp critical
         {
             avaliacoes++;
         }
 
-        atuais_solucoes[my_rank] = custo_sol_corrente; // coloca a atual energia num vetor auxiliar de energias
+        // coloca a atual energia num vetor auxiliar de energias
+        atuais_solucoes[my_rank] = custo_sol_corrente;
 
-        # pragma omp barrier // sincronizacao
+        // sincronizacao
+        # pragma omp barrier
 
         // calculo do termo de acoplamento
         # pragma omp single
@@ -114,26 +119,52 @@ int main(int argc, char* argv[]) {
             {
                 avaliacoes++;
             }
-        
+
             drand48_r(&buffer, &num_aleatorio); // novo numero aleatorio entre 0 e 1
-            double func_prob = pow(( ), E);
+            double func_prob = pow(E, ((custo_sol_corrente - max_sol)/t_ac))/termo_acoplamento; //
 
             // avaliacao dos atuais custos/energias
-            if (custo_sol_nova < custo_sol_corrente){
+            if (custo_sol_nova < custo_sol_corrente || func_prob > num_aleatorio){
                 custo_sol_corrente = custo_sol_nova;
                 atuais_solucoes[my_rank] = custo_sol_corrente;
-            } else if (){
-
             }
 
+            // sincronizacao
+            # pragma omp barrier
+
+            # pragma omp single
+            {
+                int i;
+
+                // calculo do termo de acoplamento
+                termo_acoplamento = 0;
+                for (i = 0; i < num_otimizadores; i++) {
+                    termo_acoplamento += pow(E, ((atuais_solucoes[i] - max_sol)/t_ac));
+                }
+
+                // calculo da variancia da funcao de probabilidades de aceitacao
+                sigma = 0;
+                for (i = 0; i < num_otimizadores; i++) {
+                    sigma += (func_prob * func_prob) - 1/(num_otimizadores * num_otimizadores);
+                }
+                sigma = (1/num_otimizadores) * sigma;
+
+                // avaliacao e atualizacao da temperatura de aceitacao
+                if (sigma < var_desejada)
+                    t_ac = t_ac - 0.01;
+                else if (sigma >= var_desejada)
+                    t_ac = t_ac + 0.01;
+
+                // atualizacao da temperatura de geracao
+                t_gen = 0.99992 * t_gen;
+
+                // atualiza o valor maximo
+                max_sol = maxValue(atuais_solucoes, num_otimizadores);
+
+                // incrementa k
+                k++;
+            }
         }
-    
-
-
-
-
-
-
     }
 
     //
