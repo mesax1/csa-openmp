@@ -97,8 +97,6 @@ int main(int argc, char* argv[]) {
 
         custo_sol_corrente = CSA_EvalCost(sol_corrente, dim, num_function); // nova energia corrente
 
-        printf("thread numero %d == %f\n",my_rank, custo_sol_corrente);
-
         // incrementa +1 avaliacao na funcao objetivo
         # pragma omp atomic
             avaliacoes++;
@@ -115,8 +113,6 @@ int main(int argc, char* argv[]) {
         // calculo do termo de acoplamento
         # pragma omp single private(i)
         {
-            printf("Menor custo entre as threads: %f\n", minValue(atuais_custos, num_otimizadores));
-            printf("Maior custo entre as threads: %f\n", maxValue(atuais_custos, num_otimizadores));
             for (i = 0; i < num_otimizadores; i++) {
                 termo_acoplamento += pow(E, ((atuais_custos[i] - maxValue(atuais_custos, num_otimizadores))/t_ac));
             }
@@ -133,6 +129,10 @@ int main(int argc, char* argv[]) {
             for (i = 0; i < num_otimizadores; i++) {
                 drand48_r(&buffer, &num_aleatorio); //gera um número entre 0 e 1
                 sol_nova[i] = fmod((sol_corrente[i] + t_gen * tan(PI*(num_aleatorio-0.5))), 1.0);
+                if (sol_nova[i] > 1.0 || sol_nova[i] < -1.0) {
+                    printf("Intervalo de soluções mal definido!\n");
+                    exit(0);
+                }
             }
 
             // nova energia
@@ -145,10 +145,6 @@ int main(int argc, char* argv[]) {
             }
 
             drand48_r(&buffer, &num_aleatorio); // novo numero aleatorio entre 0 e 1
-            if (num_aleatorio < 0 || num_aleatorio > 1) {
-                printf("DEU BRONCA!\n");
-                exit(0);
-            }
 
             // avaliacao dos atuais custos/energias
             if (custo_sol_nova < custo_sol_corrente || func_prob > num_aleatorio){
@@ -161,6 +157,7 @@ int main(int argc, char* argv[]) {
                 if (melhor_custo > custo_sol_nova) {
                     melhor_custo = custo_sol_nova;
                     melhor_solucao = sol_corrente;
+
                 }
             }
 
@@ -200,15 +197,20 @@ int main(int argc, char* argv[]) {
             func_prob = pow(E, ((custo_sol_corrente - maxValue(atuais_custos, num_otimizadores))/t_ac))/termo_acoplamento;
         }
 
-        # pragma omp barrier
+        // melhores custos gerais agora no vetor de atuais custos
+        atuais_custos[my_rank] = melhor_custo;
 
+        # pragma omp barrier // sincronizacao
+
+        // recupera o menor custo total
         # pragma omp single private(i)
         {
             menor_custo_total = minValue(atuais_custos, num_otimizadores);
         }
 
+        // o otimizador com o menor custo o imprime
         if (menor_custo_total == my_rank) {
-            printf("%f\n",melhor_custo);
+            printf("\n\n\n%f\n",melhor_custo);
             for (i = 0; i < dim; i++) {
                 printf("%f ", melhor_solucao[i]);
             }
