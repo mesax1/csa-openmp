@@ -63,7 +63,6 @@ int main(int argc, char* argv[]) {
     num_otimizadores = atoi(argv[1]); // pega a numero de threads do programa
     dim = atoi(argv[2]); // pega a dimensao do arg da linha de comando
     num_function = num_function_choices[atoi(argv[3])]; // pega a funcao a ser usada
-    printf("Numero de otimizadores: %d\nNumero de dimensoes: %d\nFuncao escolhida: %d\n",num_otimizadores, dim, num_function);
 
     double var_desejada = 0.99 * ((num_otimizadores - 1)/(num_otimizadores * num_otimizadores )); // calculo da variancia desejada
     double *sol_corrente; // solucao corrente
@@ -157,7 +156,6 @@ int main(int argc, char* argv[]) {
                 if (melhor_custo > custo_sol_nova) {
                     melhor_custo = custo_sol_nova;
                     melhor_solucao = sol_corrente;
-
                 }
             }
 
