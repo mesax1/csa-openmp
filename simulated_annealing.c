@@ -68,17 +68,17 @@ int main(int argc, char* argv[]) {
     double *sol_corrente; // solucao corrente
     double *sol_nova; // solucao nova
     double *melhor_solucao; // solucao nova
-    double *vetor_func_prob = (double *)malloc(num_otimizadores * sizeof(double)); // solucao nova
     double *tmp = NULL; // usado para trocar valores
+    double *vetor_func_prob = (double *)malloc(num_otimizadores * sizeof(double)); // solucao nova
     double *atuais_custos = (double *)malloc(num_otimizadores * sizeof(double));
-    double termo_acoplamento = 0;
+    double termo_acoplamento;
     double sigma;
     struct drand48_data buffer; // semente
 
     /* --------------------  inicia regiao paralela ------------------------- */
     # pragma omp parallel num_threads((int)num_otimizadores) \
     default(none) \
-    shared(vetor_func_prob, sigma, menor_custo_total, k, termo_acoplamento, avaliacoes, t_gen, t_ac, num_otimizadores, dim, num_function, var_desejada, atuais_custos) \
+    shared(vetor_func_prob, sigma, menor_custo_total, k, termo_acoplamento, avaliacoes, t_gen, t_ac, atuais_custos, num_otimizadores, dim, num_function, var_desejada) \
     private(num_aleatorio, tmp, buffer, melhor_custo, custo_sol_corrente, sol_corrente, sol_nova, custo_sol_nova, melhor_solucao, i)
     {
         sol_corrente = (double *)malloc(dim * sizeof(double));
@@ -116,12 +116,15 @@ int main(int argc, char* argv[]) {
         // calculo do termo de acoplamento
         # pragma omp single private(i)
         {
+            termo_acoplamento = 0;
             for (i = 0; i < (int) num_otimizadores; i++) {
-                termo_acoplamento += pow(E, ((atuais_custos[i] - maxValue(atuais_custos, (int)num_otimizadores))/t_ac));
+                termo_acoplamento += pow(EULLER, ((atuais_custos[i] - maxValue(atuais_custos, (int)num_otimizadores))/t_ac));
             }
         }
 
-        double func_prob = pow(E, ((custo_sol_corrente - maxValue(atuais_custos, (int)num_otimizadores))/t_ac))/termo_acoplamento; // funcao de probabilidade de aceitacao
+        # pragma omp barrier
+
+        double func_prob = pow(EULLER, ((custo_sol_corrente - maxValue(atuais_custos, (int)num_otimizadores))/t_ac))/termo_acoplamento; // funcao de probabilidade de aceitacao
         printf("Thread (%d) --- func_prob = %1.2e\n", my_rank, func_prob);
         if (func_prob < 0 || func_prob > 1){
             printf("Limite errado da função de probabilidade\n");
@@ -154,6 +157,10 @@ int main(int argc, char* argv[]) {
             }
 
             drand48_r(&buffer, &num_aleatorio); // novo numero aleatorio entre 0 e 1
+            if (num_aleatorio > 1 || num_aleatorio < 0) {
+                printf("ERRO NO LIMITE DE R = %f\n", num_aleatorio);
+                exit(0);
+            }
 
             // avaliacao dos atuais custos/energias
             if (custo_sol_nova <= custo_sol_corrente || func_prob > num_aleatorio){
@@ -178,13 +185,28 @@ int main(int argc, char* argv[]) {
                 for (i = 0; i < num_otimizadores; i++) {
                     soma += vetor_func_prob[i];
                 }
-                printf("SOMA DO VETOR DE FUNC = %f\n", soma);
+                // printf("SOMA DO VETOR DE FUNC = %f\n", soma);
+
                 // calculo do termo de acoplamento
                 termo_acoplamento = 0;
                 for (i = 0; i < (int) num_otimizadores; i++) {
-                    termo_acoplamento += pow(E, ((atuais_custos[i] - maxValue(atuais_custos, (int) num_otimizadores))/t_ac));
+                    termo_acoplamento += pow(EULLER, ((atuais_custos[i] - maxValue(atuais_custos, (int) num_otimizadores))/t_ac));
                 }
+            }
 
+            // recalcula a funcao de probabilidade
+            // printf("CUSTO CORRENTE = %1.2e\tTERMO ACOPL = %1.2e\tT_AC = %1.2e\n", custo_sol_corrente, termo_acoplamento, t_ac);
+            func_prob = pow(EULLER, ((custo_sol_corrente - maxValue(atuais_custos, (int) num_otimizadores))/t_ac))/termo_acoplamento;
+            if (func_prob < 0 || func_prob > 1){
+                printf("Limite errado da função de probabilidade\n");
+                exit(0);
+            }
+            vetor_func_prob[my_rank] = func_prob;
+
+            # pragma omp barrier
+
+            # pragma omp single private(i)
+            {
                 // calculo da variancia da funcao de probabilidades de aceitacao
                 sigma = 0;
                 double partial_sigma = 0;
@@ -192,7 +214,9 @@ int main(int argc, char* argv[]) {
                     partial_sigma += (double) pow(vetor_func_prob[i], 2);
                 }
 
+                // printf("PARTIAL SIGMA = %1.20e\n", partial_sigma);
                 sigma = ((1/num_otimizadores) * partial_sigma) - 1/(num_otimizadores * num_otimizadores);
+                // printf("SIGMA = %1.20e\n", sigma);
 
                 double sigma_limit = ((num_otimizadores - 1)/(num_otimizadores * num_otimizadores));
                 if (sigma < 0 || sigma > sigma_limit){
@@ -214,14 +238,6 @@ int main(int argc, char* argv[]) {
                 k++;
             }
 
-            // recalcula a funcao de probabilidade
-            // printf("CUSTO CORRENTE = %1.2e\tTERMO ACOPL = %1.2e\tT_AC = %1.2e\n", custo_sol_corrente, termo_acoplamento, t_ac);
-            func_prob = pow(E, ((custo_sol_corrente - maxValue(atuais_custos, (int) num_otimizadores))/t_ac))/termo_acoplamento;
-            if (func_prob < 0 || func_prob > 1){
-                printf("Limite errado da função de probabilidade\n");
-                exit(0);
-            }
-            vetor_func_prob[my_rank] = func_prob;
 
         }
 
