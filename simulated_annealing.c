@@ -138,7 +138,6 @@ int main(int argc, char* argv[]) {
             for (i = 0; i < (int) num_otimizadores; i++) {
                 drand48_r(&buffer, &num_aleatorio); //gera um número entre 0 e 1
                 sol_nova[i] = fmod((sol_corrente[i] + t_gen * tan(PI*(num_aleatorio-0.5))), 1.0);
-
                 if (sol_nova[i] > 1.0 || sol_nova[i] < -1.0) {
                     printf("Intervalo de soluções mal definido!\n");
                     exit(0);
