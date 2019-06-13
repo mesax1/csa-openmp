@@ -67,23 +67,24 @@ int main(int argc, char* argv[]) {
     double var_desejada = 0.99 * ((num_otimizadores - 1)/(num_otimizadores * num_otimizadores )); // calculo da variancia desejada
     double *sol_corrente; // solucao corrente
     double *sol_nova; // solucao nova
-    double *melhor_solucao; // solucao nova
     double *tmp = NULL; // usado para trocar valores
     double *vetor_func_prob = (double *)malloc(num_otimizadores * sizeof(double)); // solucao nova
-    double *atuais_custos = (double *)malloc(num_otimizadores * sizeof(double));
-    double termo_acoplamento;
+    double *atuais_custos = (double *)malloc(num_otimizadores * sizeof(double)); // custos correntes de cada otimizador
+    double termo_acoplamento; // termo de acoplamento
     double sigma;
+    double total_time; // tempo total de execucao
+    double start; // tempo de inicio da execucao
+
     struct drand48_data buffer; // semente
 
     /* --------------------  inicia regiao paralela ------------------------- */
     # pragma omp parallel num_threads((int)num_otimizadores) \
     default(none) \
     shared(vetor_func_prob, sigma, menor_custo_total, k, termo_acoplamento, avaliacoes, t_gen, t_ac, atuais_custos, num_otimizadores, dim, num_function, var_desejada) \
-    private(num_aleatorio, tmp, buffer, melhor_custo, custo_sol_corrente, sol_corrente, sol_nova, custo_sol_nova, melhor_solucao, i)
+    private(num_aleatorio, tmp, buffer, melhor_custo, custo_sol_corrente, sol_corrente, sol_nova, custo_sol_nova, i)
     {
-        sol_corrente = (double *)malloc(dim * sizeof(double));
-        sol_nova = (double *)malloc(dim * sizeof(double));
-        melhor_solucao = (double *)malloc(dim * sizeof(double));
+        sol_corrente = (double *)malloc(dim * sizeof(double)); // alocacao da solucao corrente
+        sol_nova = (double *)malloc(dim * sizeof(double)); // alocacao da nova solucao
 
         int my_rank = omp_get_thread_num(); // rank da thread/otimizador
         srand48_r(time(NULL)+my_rank*my_rank,&buffer); // Gera semente
@@ -92,6 +93,7 @@ int main(int argc, char* argv[]) {
         for (i = 0; i < dim; i++){
             drand48_r(&buffer, &num_aleatorio); //gera um número entre 0 e 1
             sol_corrente[i] = 2.0*num_aleatorio-1.0;
+            // verifica se o valor esta no intervalo previsto
             if (sol_corrente[i] < -1.0 || sol_corrente[i] > 1.0) {
                 printf("Erro no limite da primeira solucao corrente: \n");
                 exit(0);
@@ -120,16 +122,16 @@ int main(int argc, char* argv[]) {
             for (i = 0; i < (int) num_otimizadores; i++) {
                 termo_acoplamento += pow(EULLER, ((atuais_custos[i] - maxValue(atuais_custos, (int)num_otimizadores))/t_ac));
             }
-        }
+        } // barreira implicita
 
-        # pragma omp barrier
-
-        double func_prob = pow(EULLER, ((custo_sol_corrente - maxValue(atuais_custos, (int)num_otimizadores))/t_ac))/termo_acoplamento; // funcao de probabilidade de aceitacao
-        printf("Thread (%d) --- func_prob = %1.2e\n", my_rank, func_prob);
+        // funcao de probabilidade de aceitacao
+        double func_prob = pow(EULLER, ((custo_sol_corrente - maxValue(atuais_custos, (int)num_otimizadores))/t_ac))/termo_acoplamento;
+        // verifica se a funcao esta no intervalo previsto
         if (func_prob < 0 || func_prob > 1){
             printf("Limite errado da função de probabilidade\n");
             exit(0);
         }
+        //adiciona o valor da funcao do otimizador N na sua posicao correspondente no vetor de funcoes
         vetor_func_prob[my_rank] = func_prob;
 
         /*
@@ -138,9 +140,10 @@ int main(int argc, char* argv[]) {
         */
         while(avaliacoes < 1000000){
             // gera a nova solucao a partir da corrente
-            for (i = 0; i < (int) num_otimizadores; i++) {
+            for (i = 0; i < dim; i++) {
                 drand48_r(&buffer, &num_aleatorio); //gera um número entre 0 e 1
                 sol_nova[i] = fmod((sol_corrente[i] + t_gen * tan(PI*(num_aleatorio-0.5))), 1.0);
+                // verifica se o valor esta no intervalo previsto
                 if (sol_nova[i] > 1.0 || sol_nova[i] < -1.0) {
                     printf("Intervalo de soluções mal definido!\n");
                     exit(0);
@@ -151,12 +154,11 @@ int main(int argc, char* argv[]) {
             custo_sol_nova = CSA_EvalCost(sol_nova, dim, num_function);
 
             // incrementa +1 avaliacao na funcao objetivo
-            # pragma omp critical
-            {
+            # pragma omp atomic
                 avaliacoes++;
-            }
 
-            drand48_r(&buffer, &num_aleatorio); // novo numero aleatorio entre 0 e 1
+            // novo numero aleatorio entre 0 e 1
+            drand48_r(&buffer, &num_aleatorio);
             if (num_aleatorio > 1 || num_aleatorio < 0) {
                 printf("ERRO NO LIMITE DE R = %f\n", num_aleatorio);
                 exit(0);
@@ -170,53 +172,45 @@ int main(int argc, char* argv[]) {
                 custo_sol_corrente = custo_sol_nova;
                 atuais_custos[my_rank] = custo_sol_nova;
 
+                // se a nova solucao for menor que a melhor/menor atual, troca
                 if (melhor_custo > custo_sol_nova) {
                     melhor_custo = custo_sol_nova;
-                    melhor_solucao = sol_corrente;
                 }
             }
 
             // sincronizacao
             # pragma omp barrier
 
+
+            // calculo do termo de acoplamento
             # pragma omp single private(i)
             {
-                double soma = 0;
-                for (i = 0; i < num_otimizadores; i++) {
-                    soma += vetor_func_prob[i];
-                }
-                // printf("SOMA DO VETOR DE FUNC = %f\n", soma);
-
-                // calculo do termo de acoplamento
                 termo_acoplamento = 0;
                 for (i = 0; i < (int) num_otimizadores; i++) {
                     termo_acoplamento += pow(EULLER, ((atuais_custos[i] - maxValue(atuais_custos, (int) num_otimizadores))/t_ac));
                 }
-            }
+            } // barreira implicita
 
             // recalcula a funcao de probabilidade
-            // printf("CUSTO CORRENTE = %1.2e\tTERMO ACOPL = %1.2e\tT_AC = %1.2e\n", custo_sol_corrente, termo_acoplamento, t_ac);
             func_prob = pow(EULLER, ((custo_sol_corrente - maxValue(atuais_custos, (int) num_otimizadores))/t_ac))/termo_acoplamento;
             if (func_prob < 0 || func_prob > 1){
                 printf("Limite errado da função de probabilidade\n");
                 exit(0);
             }
+            // adiciona novamente ao vetor de funcoes de probabilidade
             vetor_func_prob[my_rank] = func_prob;
 
+            // sincronizacao
             # pragma omp barrier
 
             # pragma omp single private(i)
             {
                 // calculo da variancia da funcao de probabilidades de aceitacao
                 sigma = 0;
-                double partial_sigma = 0;
                 for (i = 0; i < (int) num_otimizadores; i++) {
-                    partial_sigma += (double) pow(vetor_func_prob[i], 2);
+                    sigma += (double) pow(vetor_func_prob[i], 2);
                 }
-
-                // printf("PARTIAL SIGMA = %1.20e\n", partial_sigma);
-                sigma = ((1/num_otimizadores) * partial_sigma) - 1/(num_otimizadores * num_otimizadores);
-                // printf("SIGMA = %1.20e\n", sigma);
+                sigma = ((1/num_otimizadores) * sigma) - 1/(num_otimizadores * num_otimizadores);
 
                 double sigma_limit = ((num_otimizadores - 1)/(num_otimizadores * num_otimizadores));
                 if (sigma < 0 || sigma > sigma_limit){
@@ -236,29 +230,25 @@ int main(int argc, char* argv[]) {
 
                 // incrementa k
                 k++;
-            }
-
-
+            } // barreira implicita
         }
 
         // melhores custos gerais agora no vetor de atuais custos
         atuais_custos[my_rank] = melhor_custo;
 
-        # pragma omp barrier // sincronizacao
+        // sincronizacao
+        # pragma omp barrier
 
         // recupera o menor custo total
         # pragma omp single private(i)
         {
+            // pega o menor custo entre todas as threads
             menor_custo_total = minValue(atuais_custos, (int) num_otimizadores);
-        }
+        } // barreira implicita
 
         // o otimizador com o menor custo o imprime
         if (menor_custo_total == my_rank) {
-            printf("\n\n\n%f\n",melhor_custo);
-            for (i = 0; i < dim; i++) {
-                printf("%f ", melhor_solucao[i]);
-            }
-            printf("\n");
+            printf("\n\n\n%1.10e\n", melhor_custo);
         }
     }
 
